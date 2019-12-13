@@ -64,6 +64,9 @@ module "app" {
     SPRING_DATASOURCE_USERNAME = "${module.db.user_name}"
     SPRING_DATASOURCE_PASSWORD = "${module.db.postgresql_password}"
 
+    DM_MULTIPART_WHITELIST = "${var.dm_multipart_whitelist}"
+    DM_MULTIPART_WHITELIST_EXT = "${var.dm_multipart_whitelist_ext}"
+
     MAX_FILE_SIZE = "${var.max_file_size_in_mb}MB"
 
     # idam
