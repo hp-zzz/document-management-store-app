@@ -21,6 +21,9 @@ def component = "store"
 def secrets = [
     's2s-${env}': [
         secret('microservicekey-em-gw', 'S2S_TOKEN')
+    ],
+    'dm-${env}': [
+        secret('dm-store-storage-account-primary-connection-string', 'STORAGEACCOUNT_PRIMARY_CONNECTION_STRING')
     ]
 ]
 
@@ -35,7 +38,7 @@ static LinkedHashMap<String, Object> secret(String secretName, String envVar) {
 
 withNightlyPipeline(type, product, component) {
     enableSlackNotifications('#ccd-nightly-builds')
-    enableDbMigration()
+    enableDbMigration('ccd')
     loadVaultSecrets(secrets)
 
     if (params.RUN_MUTATION) {

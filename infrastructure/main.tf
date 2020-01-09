@@ -29,6 +29,7 @@ locals {
 
   sharedAppServicePlan = "${var.shared_product}-${var.env}"
   sharedASPResourceGroup = "${var.shared_product}-shared-${var.env}"
+  managed_identity_object_id = "${var.managed_identity_object_id}"
 }
 
 module "app" {
@@ -45,6 +46,7 @@ module "app" {
   asp_name = "${(var.asp_name == "use_shared") ? local.sharedAppServicePlan : var.asp_name}"
   asp_rg = "${(var.asp_rg == "use_shared") ? local.sharedASPResourceGroup : var.asp_rg}"
   website_local_cache_sizeinmb = 1600
+  enable_ase = false
 
   app_settings = {
     POSTGRES_HOST = "${module.db.host_name}"
@@ -53,12 +55,13 @@ module "app" {
     POSTGRES_USER = "${module.db.user_name}"
     POSTGRES_PASSWORD = "${module.db.postgresql_password}"
     MAX_ACTIVE_DB_CONNECTIONS = 70
+    FORCE_APPLY = "true"
 
     # JAVA_OPTS = "${var.java_opts}"
     # SERVER_PORT = "8080"
 
     # db
-    SPRING_DATASOURCE_URL = "jdbc:postgresql://${module.db.host_name}:${module.db.postgresql_listen_port}/${module.db.postgresql_database}?ssl=true"
+    SPRING_DATASOURCE_URL = "jdbc:postgresql://${module.db.host_name}:${module.db.postgresql_listen_port}/${module.db.postgresql_database}?sslmode=require"
     SPRING_DATASOURCE_USERNAME = "${module.db.user_name}"
     SPRING_DATASOURCE_PASSWORD = "${module.db.postgresql_password}"
 
@@ -78,7 +81,6 @@ module "app" {
     PACKAGES_PROJECT = "${var.team_name}"
     PACKAGES_ENVIRONMENT = "${var.env}"
 
-    ROOT_APPENDER = "${var.root_appender}"
     JSON_CONSOLE_PRETTY_PRINT = "${var.json_console_pretty_print}"
     LOG_OUTPUT = "${var.log_output}"
 
@@ -88,15 +90,11 @@ module "app" {
     LOG_LEVEL_DM = "${var.log_level_dm}"
     SHOW_SQL = "${var.show_sql}"
 
-    ENDPOINTS_HEALTH_SENSITIVE = "${var.endpoints_health_sensitive}"
-    ENDPOINTS_INFO_SENSITIVE = "${var.endpoints_info_sensitive}"
 
     ENABLE_DB_MIGRATE="false"
 
     DM_MULTIPART_WHITELIST = "${var.dm_multipart_whitelist}"
     DM_MULTIPART_WHITELIST_EXT = "${var.dm_multipart_whitelist_ext}"
-    S2S_NAMES_WHITELIST = "${var.s2s_names_whitelist}"
-    CASE_WORKER_ROLES = "${var.case_worker_roles}"
 
     # Toggles
     ENABLE_IDAM_HEALTH_CHECK = "${var.enable_idam_healthcheck}"
@@ -106,9 +104,7 @@ module "app" {
     ENABLE_DELETE = "${var.enable_delete}"
     ENABLE_TTL = "${var.enable_ttl}"
     ENABLE_THUMBNAIL = "${var.enable_thumbnail}"
-
-    ENABLE_AZURE_STORAGE_CONTAINER = "${var.enable_azure_storage_container}"
-    ENABLE_POSTGRES_BLOB_STORAGE = "${var.enable_postgres_blob_storage}"
+    ENABLE_TESTING = "${var.enable_testing}"
 
     # Migration Job specific
     BLOBSTORE_MIGRATE_CCD_SECRET = "${var.blobstore_migrate_ccd_secret}"
@@ -150,32 +146,43 @@ data "azurerm_key_vault" "ccd_shared_vault" {
   resource_group_name = "${local.sharedResourceGroup}"
 }
 
+data "azurerm_key_vault" "dm_shared_vault" {
+  name = "dm-${var.env}"
+  resource_group_name = "dm-shared-${var.env}"
+}
+
 resource "azurerm_key_vault_secret" "POSTGRES-USER" {
-  name = "${local.app_full_name}-POSTGRES-USER"
+  name = "${var.component}-POSTGRES-USER"
   value = "${module.db.user_name}"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
 
 resource "azurerm_key_vault_secret" "POSTGRES-PASS" {
-  name = "${local.app_full_name}-POSTGRES-PASS"
+  name = "${var.component}-POSTGRES-PASS"
   value = "${module.db.postgresql_password}"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
 
+resource "azurerm_key_vault_secret" "POSTGRES-PASS-DM" {
+  name = "${var.component}-POSTGRES-PASS"
+  value = "${module.db.postgresql_password}"
+  key_vault_id = "${data.azurerm_key_vault.dm_shared_vault.id}"
+}
+
 resource "azurerm_key_vault_secret" "POSTGRES_HOST" {
-  name = "${local.app_full_name}-POSTGRES-HOST"
+  name = "${var.component}-POSTGRES-HOST"
   value = "${module.db.host_name}"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
 
 resource "azurerm_key_vault_secret" "POSTGRES_PORT" {
-  name = "${local.app_full_name}-POSTGRES-PORT"
+  name = "${var.component}-POSTGRES-PORT"
   value = "${module.db.postgresql_listen_port}"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
 
 resource "azurerm_key_vault_secret" "POSTGRES_DATABASE" {
-  name = "${local.app_full_name}-POSTGRES-DATABASE"
+  name = "${var.component}-POSTGRES-DATABASE"
   value = "${module.db.postgresql_database}"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
@@ -185,7 +192,20 @@ data "azurerm_key_vault_secret" "dm_store_storageaccount_primary_connection_stri
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
 
+resource "azurerm_key_vault_secret" "primary_connection_string" {
+  name = "dm-store-storage-account-primary-connection-string"
+  value = "${data.azurerm_key_vault_secret.dm_store_storageaccount_primary_connection_string.value}"
+  key_vault_id = "${data.azurerm_key_vault.dm_shared_vault.id}"
+}
+
 data "azurerm_key_vault_secret" "dm_store_storageaccount_secondary_connection_string" {
   name = "dm-store-storage-account-secondary-connection-string"
   key_vault_id = "${data.azurerm_key_vault.ccd_shared_vault.id}"
 }
+
+resource "azurerm_key_vault_secret" "secondary_connection_string" {
+  name = "dm-store-storage-account-secondary-connection-string"
+  value = "${data.azurerm_key_vault_secret.dm_store_storageaccount_secondary_connection_string.value}"
+  key_vault_id = "${data.azurerm_key_vault.dm_shared_vault.id}"
+}
+
